@@ -3,29 +3,37 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Chem Reaction</title>
+<title>Desk Chem Lab</title>
+<link rel="icon" href="data:,">
 <style>
-  :root { --ink: #EAF6FF; --chip: rgba(10, 24, 40, .62); --on: #2FB6E8; }
+  :root { --ink: #EAF6FF; --chip: rgba(14, 22, 34, .66); --gold: #FFD36B; }
   html, body { margin: 0; height: 100%; overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; color: var(--ink); }
   body { background: linear-gradient(180deg, #F3E6D2 0%, #E4CFB0 60%, #B89670 100%); }
-  #cv { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-  #rd { position: fixed; left: 12px; top: max(12px, env(safe-area-inset-top)); background: var(--chip); backdrop-filter: blur(6px); border-radius: 12px; padding: 8px 10px; font-size: 12px; max-width: calc(100vw - 48px); }
-  #rd .rt { font-size: 13px; margin-bottom: 4px; } #rd .rs { opacity: .85; margin-top: 4px; max-width: 330px; } #rd .eq { font-weight: 600; opacity: 1; color: #FFE08A; }
-  #rd table { border-collapse: collapse; } #rd th { font-weight: 600; opacity: .7; text-align: left; padding: 1px 8px 1px 0; white-space: nowrap; vertical-align: top; }
-  #rd td { padding: 1px 8px 1px 0; } #rd tr.tp td { opacity: .5; } .tagk { background: #2FB6E8; color: #04202E; border-radius: 6px; padding: 0 5px; font-size: 11px; }
-  #bar { position: fixed; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%); display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; width: max-content; max-width: calc(100vw - 32px); }
-  #bar button { border: 0; border-radius: 999px; padding: 10px 14px; background: var(--chip); color: var(--ink); font: 600 13px "Segoe UI", system-ui, sans-serif; backdrop-filter: blur(6px); cursor: pointer; }
-  #bar button.on { background: var(--on); color: #04202E; }
-  #toast { position: fixed; left: 50%; bottom: 120px; transform: translateX(-50%); background: rgba(255, 224, 130, .95); color: #08202E; padding: 6px 12px; border-radius: 10px; font-size: 13px; opacity: 0; transition: opacity .3s; pointer-events: none; max-width: calc(100vw - 48px); text-align: center; }
+  body.desk { background: #000; }
+  #cv, #vid, #fx { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  #cv { touch-action: none; } #vid { object-fit: cover; }
+  body.mirror #vid, body.mirror #cv, body.mirror #fx { transform: scaleX(-1); }
+  #ui { position: fixed; inset: 0; pointer-events: none; } #ui > * { pointer-events: auto; } #ui > #fx, #ui > #toast, #ui > #tag { pointer-events: none; }
+  #card { position: fixed; left: 10px; right: 10px; top: max(10px, env(safe-area-inset-top)); max-width: 460px; margin: 0 auto; background: var(--chip); backdrop-filter: blur(8px); border-radius: 14px; padding: 9px 12px; font-size: 12.5px; line-height: 1.35; }
+  #card .st { display: flex; justify-content: space-between; align-items: center; font-size: 11px; opacity: .8; margin-bottom: 3px; }
+  #card .dots i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: rgba(255, 255, 255, .25); margin-left: 3px; }
+  #card .dots i.ok { background: #4fe08a; } #card .dots i.now { background: var(--gold); }
+  #card .tt { font-size: 14.5px; font-weight: 650; } #card .why { opacity: .85; margin-top: 3px; } #card .eq { color: var(--gold); font-weight: 600; margin-top: 4px; }
+  #card .safe { color: #ffb4a0; margin-top: 4px; }
+  #card table { border-collapse: collapse; margin-top: 5px; } #card th { text-align: left; opacity: .65; font-weight: 600; padding: 0 8px 0 0; white-space: nowrap; vertical-align: top; } #card td { padding: 0; }
+  #bar { position: fixed; left: 50%; bottom: max(12px, env(safe-area-inset-bottom)); transform: translateX(-50%); display: flex; gap: 7px; flex-wrap: wrap; justify-content: center; width: max-content; max-width: calc(100vw - 24px); }
+  button, .btn { border: 0; border-radius: 999px; padding: 11px 15px; min-height: 44px; background: var(--chip); color: var(--ink); font: 600 13px "Segoe UI", system-ui, sans-serif; backdrop-filter: blur(6px); cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; }
+  #bDesk, #bBack, #bFront { background: var(--gold); color: #1d1606; }
+  #toast { position: fixed; left: 50%; bottom: 128px; transform: translateX(-50%); background: rgba(255, 224, 130, .96); color: #1d1606; padding: 8px 13px; border-radius: 12px; font-size: 13.5px; opacity: 0; transition: opacity .3s; max-width: calc(100vw - 40px); text-align: center; }
   #toast.show { opacity: 1; }
-  #ui { position: fixed; inset: 0; pointer-events: none; } #ui > * { pointer-events: auto; } #ui > #toast { pointer-events: none; }
-  #bAR, #bHand { background: #FFD36B !important; color: #08202E !important; }
-  #hint { position: fixed; left: 50%; top: 45%; transform: translate(-50%, -50%); background: var(--chip); padding: 10px 14px; border-radius: 14px; font-size: 14px; text-align: center; max-width: calc(100vw - 64px); }
-  #vid { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-  #fx { position: fixed; inset: 0; width: 100%; height: 100%; } #ui > #fx { pointer-events: none; }
-  #fit { position: fixed; left: 50%; transform: translateX(-50%); bottom: 150px; background: var(--chip); padding: 6px 12px; border-radius: 999px; font-size: 12px; display: flex; gap: 8px; align-items: center; white-space: nowrap; }
-  #fit input { width: 150px; }
-  #hand { position: fixed; right: 12px; top: max(12px, env(safe-area-inset-top)); background: var(--chip); padding: 5px 10px; border-radius: 999px; font-size: 12px; }
+  #tag { position: fixed; transform: translate(-50%, -100%); background: rgba(14, 22, 34, .8); color: #fff; padding: 4px 9px; border-radius: 999px; font-size: 12px; white-space: nowrap; border: 1px solid rgba(255, 211, 107, .6); }
+  #st { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(max(12px, env(safe-area-inset-bottom)) + 58px); background: var(--chip); padding: 5px 11px; border-radius: 999px; font-size: 12px; white-space: nowrap; max-width: calc(100vw - 24px); overflow: hidden; text-overflow: ellipsis; }
+  #help { position: fixed; inset: 0; background: rgba(8, 12, 20, .72); display: flex; align-items: center; justify-content: center; padding: 16px; }
+  #help .box { background: #16202e; border-radius: 16px; padding: 16px 18px; max-width: 440px; font-size: 14px; line-height: 1.45; }
+  #help h2 { margin: 0 0 8px; font-size: 18px; } #help ol { padding-left: 20px; margin: 6px 0 12px; } #help .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  #help img { width: 100%; border-radius: 10px; margin: 4px 0 8px; background: #fff; }
+  @media (max-height: 520px) { #card { left: 10px; right: auto; margin: 0; max-width: 340px; font-size: 11.5px; padding: 7px 10px; } #card .tt { font-size: 13px; } #card .why { display: none; }
+    #bar button { min-height: 40px; padding: 8px 12px; font-size: 12px; } #toast { bottom: 70px; } }
   .hide { display: none !important; }
 </style>
 </head>
@@ -34,24 +42,31 @@
 <canvas id="cv"></canvas>
 <div id="ui">
   <canvas id="fx"></canvas>
-  <div id="rd"></div>
-  <div id="hint" class="hide"></div>
+  <div id="card"></div>
+  <div id="tag" class="hide"></div>
   <div id="toast"></div>
-  <div id="hand" class="hide"></div>
-  <label id="fit" class="hide">Camera fit <input id="fitR" type="range" min="45" max="85" step="1" value="63"></label>
+  <div id="st" class="hide"></div>
   <div id="bar">
-    <button id="bAR">Place in my room (AR)</button>
-    <button id="bHand">Use my hand</button>
-    <button id="bSmall" class="hide">Smaller</button>
-    <button id="bBig" class="hide">Bigger</button>
-    <button id="bMove" class="hide">Move beakers</button>
-    <button id="bPour">Pour 20 mL</button>
-    <button id="bNext">Next reaction</button>
-    <button id="bReset">Reset</button>
-    <button id="bExit" class="hide">Exit AR</button>
+    <button id="bDesk">Desk lab (camera + mat)</button>
+    <button id="bCal" class="hide">Calibrate hand</button>
+    <button id="bHandT" class="hide">Hand: on</button>
+    <button id="bSkip">Skip step</button>
+    <button id="bRestart">Restart</button>
+    <button id="bExit" class="hide">Exit desk lab</button>
   </div>
+  <div id="help" class="hide"><div class="box">
+    <h2>Desk lab set-up</h2>
+    <ol>
+      <li><a class="btn" href="./mat.html" target="_blank" style="padding:4px 10px;min-height:0">Print the lab mat</a> on A4 at <b>100 % size</b> (not "fit to page"). Lay it flat on a table.</li>
+      <li>Put the phone on a stand at the near edge of the mat, sideways (landscape), about 40 cm from the middle of the mat and tilted so the <b>back camera</b> looks down at it (about 45°). The screen faces you; you reach past the phone to the mat.</li>
+      <li>All 6 black squares should be on screen. Then the glassware appears on the mat at real size.</li>
+      <li>Pinch your thumb and first finger on a glowing piece to hold it. Open them to let go. Tap <b>Calibrate hand</b> once with your hand flat on the mat.</li>
+    </ol>
+    <div class="row"><button id="bBack">Start: back camera</button><button id="bFront">Laptop / front camera</button><button id="bHelpX">Cancel</button></div>
+  </div></div>
 </div>
-<script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
-<script type="module" src="./main.js?v=1"></script>
+<script src="./vendor/cv.js"></script>
+<script src="./vendor/aruco.js"></script>
+<script type="module" src="./main.js?v=2"></script>
 </body>
 </html>

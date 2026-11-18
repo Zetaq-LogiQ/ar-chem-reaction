@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ZetaQ Lab Mat</title>
+<style>
+  @page { size: A4 landscape; margin: 0; }
+  html, body { margin: 0; background: #ddd; font-family: "Segoe UI", system-ui, sans-serif; }
+  .bar { padding: 10px 14px; background: #16202e; color: #fff; font-size: 14px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .bar button { border: 0; border-radius: 999px; padding: 9px 16px; background: #FFD36B; font-weight: 700; cursor: pointer; }
+  .wrap { overflow: auto; padding: 12px; }
+  #page { width: 297mm; height: 210mm; background: #fff; box-shadow: 0 2px 12px rgba(0, 0, 0, .25); margin: 0 auto; }
+  @media print { .bar { display: none; } .wrap { padding: 0; overflow: visible; } html, body { background: #fff; } #page { box-shadow: none; margin: 0; } }
+</style>
+</head>
+<body>
+<div class="bar"><button onclick="print()">Print</button> Print on A4, <b>landscape</b>, scale <b>100 %</b> ("Actual size", not "Fit to page"). Check: the ruler line on the mat must measure exactly 10 cm.</div>
+<div class="wrap"><svg id="page" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 297 210"></svg></div>
+<script src="./vendor/cv.js"></script>
+<script src="./vendor/aruco.js"></script>
+<script type="module">
+import { PAGE, MARK, MARKERS, DICT, LAYOUT } from './mat.js';
+const svg = document.getElementById('page'), NS = 'http://www.w3.org/2000/svg', dic = new AR.Dictionary(DICT);
+const el = (t, a, parent = svg) => { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); parent.appendChild(e); return e; };
+el('rect', { x: 0, y: 0, width: PAGE.w, height: PAGE.h, fill: '#fff' });
+const P = (x, z) => [x * 10 + PAGE.w / 2, z * 10 + PAGE.h / 2];          // world cm -> paper mm
+// where each piece stands: light outlines, so the real table matches the screen
+const G = el('g', { fill: 'none', stroke: '#b9c3cf', 'stroke-width': .5, 'stroke-dasharray': '2 1.5' });
+const circle = (k, r, name) => { const [x, y] = P(...LAYOUT[k]); el('circle', { cx: x, cy: y, r: r * 10 }, G); label(x, y + r * 10 + 4, name); };
+const rect = (cx, cz, w, d, name, dy = 0) => { const [x, y] = P(cx, cz); el('rect', { x: x - w * 5, y: y - d * 5, width: w * 10, height: d * 10, rx: 2 }, G); label(x, y + d * 5 + 4 + dy, name); };
+const label = (x, y, t) => { const e = el('text', { x, y, 'font-size': 3.2, fill: '#97a3b0', 'text-anchor': 'middle', 'font-family': 'Segoe UI, sans-serif' }); e.textContent = t; };
+circle('acid', 2.25, 'acid'); circle('jar', 2.45, 'copper oxide'); circle('beaker', 3.3, 'beaker');
+rect(LAYOUT.tripod[0], LAYOUT.tripod[1], 8.6, 8.6, 'tripod + lamp'); rect(LAYOUT.stand[0], LAYOUT.stand[1] - .8, 9.5, 6.2, 'filter stand');
+rect(LAYOUT.rack[0], LAYOUT.rack[1], 8.6, 4.2, 'test tube rack'); circle('ammonia', 1.5, 'ammonia');
+// markers: each black square is MARK mm; the dictionary's SVG adds a white margin of one cell (MARK / 8)
+for (const id in MARKERS) {
+  const [x, y] = MARKERS[id], cell = MARK / 8;
+  const m = new DOMParser().parseFromString(dic.generateSVG(+id), 'image/svg+xml').documentElement;
+  m.setAttribute('x', x - cell); m.setAttribute('y', y - cell); m.setAttribute('width', MARK + 2 * cell); m.setAttribute('height', MARK + 2 * cell); m.setAttribute('shape-rendering', 'crispEdges');
+  svg.appendChild(document.importNode(m, true));
+}
+// title (top, between the markers) and a 10 cm check ruler (left edge, between the markers)
+const txt = (x, y, size, fill, str, w = 400) => { const e = el('text', { x, y, 'font-size': size, 'font-weight': w, fill, 'text-anchor': 'middle', 'font-family': 'Segoe UI, sans-serif' }); e.textContent = str; return e; };
+txt(90, 29, 6, '#3b4a5c', 'ZetaQ Desk Lab Mat', 700); txt(90, 36, 3.2, '#7b8896', 'Keep all six black squares flat and in view.');
+el('line', { x1: 10, y1: 55, x2: 10, y2: 155, stroke: '#3b4a5c', 'stroke-width': .5 });
+for (let i = 0; i <= 10; i++) el('line', { x1: 10, y1: 55 + i * 10, x2: 13, y2: 55 + i * 10, stroke: '#3b4a5c', 'stroke-width': .35 });
+const r = txt(0, 0, 2.8, '#3b4a5c', '10 cm: check after printing'); r.setAttribute('transform', 'translate(17 105) rotate(-90)');
+</script>
+</body>
+</html>
