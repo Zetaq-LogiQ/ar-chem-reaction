@@ -17,6 +17,6 @@ export function markerCorners(id) {
 
 // where each piece of equipment stands (world cm, x, z), for both the mat and the 3D bench. The child sits at +z.
 export const LAYOUT = {
-  acid: [-10.5, -3], jar: [-10.5, 3.2], spatula: [-6.5, 8.9], beaker: [-3.6, 4.6], tripod: [2, -2.5], rod: [-7.5, 9.9],
-  stand: [11.5, -1.5], rack: [6.5, 6.5], ammonia: [12.5, 6.5]
+  acid: [-14, -4.5], jar: [-14, 3.5], spatula: [-9.5, 10.5], beaker: [-5.5, 5], tripod: [1.5, -4], rod: [-4, 11.8],
+  stand: [13, -3], rack: [5.5, 7], ammonia: [13.5, 7.5]
 };

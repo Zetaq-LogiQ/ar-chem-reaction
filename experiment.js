@@ -19,7 +19,7 @@ const ACID_M = .25, NH3_M = 2, CUO_G = 1.0, M_CUO = 79.55, SQUEEZE = .5, PIP_CAP
 
 export function createExperiment(ctx) {
   const group = new THREE.Group(), K = new THREE.Group(); K.scale.setScalar(10); group.add(K);
-  const bench = make('bench', { w: 3.8, d: 2.7, shelf: false }); K.add(bench);
+  const bench = make('bench', { w: 4.0, d: 2.9, shelf: false }); K.add(bench);
   const I = {};
   function add(id, obj, cm, o = {}) {
     obj.position.set(cm[0] / 10, o.y || 0, cm[1] / 10); if (o.rot) obj.rotation.set(...o.rot); K.add(obj);
@@ -382,11 +382,14 @@ export function createExperiment(ctx) {
   const segW = it => [it.obj.localToWorld(it.seg[0].clone()), it.obj.localToWorld(it.seg[1].clone())];
   const pickable = it => it.kind === 'pour' || it.kind === 'tool' || it.kind === 'tap';
   // the piece nearest to a point in the room (cm), within max cm of its surface
+  // (the piece the current step needs - the glowing one - wins a close call)
   function nearest(p, max) {
-    let best = null, bd = max; const l = new THREE.Line3(), q = V(0, 0, 0);
-    for (const id in I) { const it = I[id]; if (!pickable(it) || it.ret) continue; const [a, c] = segW(it); l.set(a, c); l.closestPointToPoint(p, true, q); const d = q.distanceTo(p) - it.r * 10; if (d < bd) { bd = d; best = id; } }
+    let best = null, bd = max; const l = new THREE.Line3(), q = V(0, 0, 0), hints = held ? [] : STEPS[step()].pick;
+    for (const id in I) { const it = I[id]; if (!pickable(it) || it.ret) continue; const [a, c] = segW(it); l.set(a, c); l.closestPointToPoint(p, true, q); const d = q.distanceTo(p) - it.r * 10 - (hints.includes(id) ? 1.5 : 0); if (d < bd) { bd = d; best = id; } }
     return best;
   }
+  // every piece that can be picked, as a segment (world cm) + radius, for picking on screen
+  function pickables() { const hints = held ? [] : STEPS[step()].pick; return Object.values(I).filter(it => pickable(it) && !it.ret).map(it => { const [a, c] = segW(it); return { id: it.id, a, c, r: it.r * 10, hint: hints.includes(it.id) }; }); }
   // the piece a screen ray points at (a ray passing within tol cm still counts: a finger is wide)
   function pickRay(ray, tol = 2) {
     let best = null, bd = tol;
@@ -449,6 +452,6 @@ export function createExperiment(ctx) {
   return {
     group, bench: [bench], I, get S() { return S; }, get held() { return held && held.id; }, get snapped() { return !!(held && held.snap && held.b > .9); },
     set hover(id) { hover = id; }, get hover() { return hover; },
-    grab, move, release, tap, update, nearest, pickRay, anchor, liftFor, grabPoint, card, label, skip, restart, step, kindOf: id => I[id] && I[id].kind
+    grab, move, release, tap, update, nearest, pickables, pickRay, anchor, liftFor, grabPoint, card, label, skip, restart, step, kindOf: id => I[id] && I[id].kind
   };
 }

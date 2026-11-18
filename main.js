@@ -46,11 +46,11 @@ const curLine = new THREE.Mesh(new THREE.CylinderGeometry(.05, .05, 1, 6).transl
 curDot.renderOrder = 20; cur.add(curDot, curShadow, curLine); curShadow.renderOrder = 19;
 
 // ------------------------------------------------------------------ 3D view camera: framed on the bench, drag to turn, pinch / wheel to zoom
-const orb = { yaw: 14, pitch: 40, zoom: 1, t: V(0, 6, 1) };
+const orb = { yaw: 14, pitch: 42, zoom: 1, t: V(0, 6, 2) };
 function view() { const top = $('card').offsetHeight + 16, bot = $('bar').offsetHeight + 24; return { top, bot, h: Math.max(120, innerHeight - top - bot) }; }
 function orbitCamera() {
   const v = view(), tf = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), aspect = innerWidth / innerHeight;
-  const dist = Math.max(30 / 2 / (tf * v.h / innerHeight), 36 / 2 / (tf * aspect)) * orb.zoom;
+  const dist = Math.max(30 / 2 / (tf * v.h / innerHeight), 42 / 2 / (tf * aspect)) * orb.zoom;
   const y = THREE.MathUtils.degToRad(orb.yaw), p = THREE.MathUtils.degToRad(orb.pitch);
   camera.fov = 32; camera.aspect = aspect; camera.near = 1; camera.far = 600;
   camera.position.set(orb.t.x + dist * Math.sin(y) * Math.cos(p), orb.t.y + dist * Math.sin(p), orb.t.z + dist * Math.cos(y) * Math.cos(p)); camera.lookAt(orb.t);
@@ -90,12 +90,25 @@ const ray = new THREE.Raycaster(), ptr = new Map(); let touch = null, orbitDrag 
 const sx = x => mirror ? innerWidth - x : x;                            // the front camera picture is shown mirrored
 function rayAt(x, y) { ray.setFromCamera(new THREE.Vector2(sx(x) / innerWidth * 2 - 1, -y / innerHeight * 2 + 1), camera); return ray.ray; }
 const plane = new THREE.Plane(V(0, 1, 0), 0), hit = V(0, 0, 0);
+// the piece nearest the finger on screen (within 34 px of its outline); the glowing piece the step needs wins a close call
+function pickScreen(x, y) {
+  const px = v => { const p = v.clone().project(camera); return { x: (p.x + 1) / 2 * innerWidth, y: (1 - p.y) / 2 * innerHeight, z: p.z }; };
+  const right = V(1, 0, 0).applyQuaternion(camera.quaternion); let best = null, bd = 34;
+  for (const c of E.pickables()) {
+    const a = px(c.a), b = px(c.c); if (a.z > 1 || b.z > 1) continue;
+    const r = Math.hypot(px(c.a.clone().addScaledVector(right, c.r)).x - a.x, px(c.a.clone().addScaledVector(right, c.r)).y - a.y);
+    const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy || 1, t = clamp(((x - a.x) * dx + (y - a.y) * dy) / L2, 0, 1);
+    const d = Math.hypot(x - a.x - t * dx, y - a.y - t * dy) - r - (c.hint ? 18 : 0);
+    if (d < bd) { bd = d; best = c.id; }
+  }
+  return best;
+}
 function planeHit(x, y) { return rayAt(x, y).intersectPlane(plane, hit) ? hit.clone() : null; }
 canvas.addEventListener('pointerdown', e => {
   canvas.setPointerCapture(e.pointerId); ptr.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (ptr.size === 2) { orbitDrag = null; const [a, b] = [...ptr.values()]; pinch0 = Math.hypot(a.x - b.x, a.y - b.y); return; }
   if (mode === 'desk' && !desk.ok) return;
-  const id = E.held ? null : E.pickRay(rayAt(e.clientX, e.clientY), 2.5);
+  const id = E.held ? null : pickScreen(sx(e.clientX), e.clientY);
   if (id && E.kindOf(id) === 'tap') { E.tap(id); return; }
   if (id) {
     const g = E.grabPoint(id); plane.constant = -Math.max(g.y + 3, E.liftFor(id));   // carried just high enough to clear its targets
@@ -106,7 +119,7 @@ canvas.addEventListener('pointerdown', e => {
 });
 canvas.addEventListener('pointermove', e => {
   const q = ptr.get(e.pointerId);
-  if (!q) { if (mode === '3d' && !E.held && e.pointerType === 'mouse') E.hover = E.pickRay(rayAt(e.clientX, e.clientY), 1.5); return; }
+  if (!q) { if (mode === '3d' && !E.held && e.pointerType === 'mouse') E.hover = pickScreen(e.clientX, e.clientY); return; }
   const dx = e.clientX - q.x, dy = e.clientY - q.y; q.x = e.clientX; q.y = e.clientY;
   if (touch && touch.id === e.pointerId) { const p = planeHit(e.clientX, e.clientY); if (p) E.move(p); return; }
   if (ptr.size === 2 && mode === '3d') { const [a, b] = [...ptr.values()], d = Math.hypot(a.x - b.x, a.y - b.y); if (pinch0) orb.zoom = clamp(orb.zoom * pinch0 / d, .45, 1.8); pinch0 = d; return; }
@@ -137,7 +150,7 @@ function handFrame(now, dt) {
   curDot.material.color.set(H.pinch ? '#4fe08a' : '#6fe0ff'); curDot.scale.setScalar(H.pinch ? .8 : 1);
   if (touch) return;
   if (!handHolding) {
-    E.hover = E.nearest(tip, 4);
+    E.hover = E.nearest(tip, 3.5);
     if (H.pinch && !wasPinch && E.hover) {
       if (E.kindOf(E.hover) === 'tap') E.tap(E.hover);
       else if (E.grab(E.hover, tip, 'hand')) { handHolding = true; openT = 0; }
@@ -158,6 +171,10 @@ function drawHand() {
   const W = innerWidth, Hh = innerHeight;
   if (fx.width !== W || fx.height !== Hh) { fx.width = mk.width = W; fx.height = mk.height = Hh; }
   fx2.clearRect(0, 0, W, Hh);
+  if (mode === 'desk' && desk.D.marks && performance.now() - (desk.D.lastSeen || 0) < 300) {   // the squares the camera can see: green outlines
+    fx2.strokeStyle = '#4fe08a'; fx2.lineWidth = 3;
+    for (const c of desk.D.marks) { fx2.beginPath(); c.forEach((q, i) => { const s = desk.toScreen(q.x / desk.W, q.y / desk.H, W, Hh); i ? fx2.lineTo(s.x, s.y) : fx2.moveTo(s.x, s.y); }); fx2.closePath(); fx2.stroke(); }
+  }
   const H = hand.H; if (mode !== 'desk' || !handOn || !H.lm || !desk.ok || performance.now() - H.seen > 250) return;
   const near = E.held || E.hover;
   if (near && !E.held) { const g = E.grabPoint(near).applyMatrix4(camera.matrixWorldInverse); if (H.camZ[9] > -g.z + 3) return; }   // the hand is behind it
@@ -188,7 +205,9 @@ function frame(now) {
     if (desk.ok) { desk.apply(camera, innerWidth, innerHeight); E.group.visible = true; }
     if (handOn && hand.ready) hand.step(now, desk, camera);
     handFrame(now, dt);
-    $('st').textContent = (desk.ok ? (desk.D.ids.length ? 'Mat ✓' : 'Mat (held)') : 'Point the camera at the mat') + (handOn && handMsg ? ' · ' + handMsg : '');
+    const D = desk.D, n = D.ids.length, lost = now - (D.lastSeen || D.t0 || (D.t0 = now)) > 4000;
+    $('st').textContent = desk.ok ? (n ? `Mat ✓ (${n} squares)` : 'Mat (held)') + (handOn && handMsg ? ' · ' + handMsg : '')
+      : n ? `Mat: ${n} square${n > 1 ? 's' : ''} seen, locking…` : lost ? 'No mat seen. Print the mat (or open it on another screen) and show all 6 squares' : 'Point the camera at the mat';
     show('st', true);
   } else { orbitCamera(); show('st', false); }
   E.update(dt, now / 1000);

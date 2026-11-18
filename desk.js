@@ -83,17 +83,20 @@ export function createDesk(video) {
     D.lastT = now; sizes();
     g.drawImage(video, 0, 0, D.W, D.H);
     const ms = det.detect(g.getImageData(0, 0, D.W, D.H)).filter(m => MARKERS[m.id]);
-    D.ids = ms.map(m => m.id);
+    D.ids = ms.map(m => m.id); D.marks = ms.map(m => m.corners); if (ms.length) D.lastSeen = now;
     if (ms.length < 1) { D.ok = D.have && now - D.seen < 1e9; return D.ok; }   // a hand over the mat: keep the last pose (the phone is still)
     const P = [], Q = [];
     for (const m of ms) { const w = markerCorners(m.id); m.corners.forEach((c, i) => { P.push(w[i]); Q.push([c.x, c.y]); }); }
     const H = homography(P, Q); if (!H) return D.ok;
     if (ms.length >= 2) { const f = focalFrom(H); if (f) { D.fSamples.push(f); if (D.fSamples.length > 40) D.fSamples.shift(); if (D.fSamples.length >= 6) { const s = [...D.fSamples].sort((a, b) => a - b); D.f = s[s.length >> 1]; try { localStorage.setItem('desk_f_' + D.facing, D.f / Math.max(D.W, D.H)); } catch (e) { } } } }
-    const p = poseFrom(H, D.f);
-    // check: how far (px) do the corners land from where this pose puts them?
-    const V = viewMatrix(p); let e = 0;
-    P.forEach((w, i) => { const c = new THREE.Vector3(w[0], 0, w[1]).applyMatrix4(V); const u = D.W / 2 + D.f * c.x / -c.z, v = D.H / 2 - D.f * c.y / -c.z; e += Math.hypot(u - Q[i][0], v - Q[i][1]); });
-    D.err = e / P.length; if (D.err > 8) return D.ok;                     // a bad read: ignore it
+    // until the zoom is known well, try zooms from 40 to 100 degrees and keep the one whose pose lands the corners best
+    if (D.fSamples.length < 6) {
+      const long = Math.max(D.W, D.H); let best = D.f, be = reproj(poseFrom(H, D.f), P, Q, D.f);
+      for (let fov = 40; fov <= 100; fov += 2) { const f = long / 2 / Math.tan(fov / 2 * Math.PI / 180), e = reproj(poseFrom(H, f), P, Q, f); if (e < be - .05) { be = e; best = f; } }
+      D.f = best;
+    }
+    const p = poseFrom(H, D.f), V = viewMatrix(p);
+    D.err = reproj(p, P, Q, D.f); if (D.err > 12) return D.ok;            // a bad read: ignore it
     // smooth: small changes are sensor noise (blend slowly), a big jump means the phone was moved (follow at once)
     const pos = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3(); new THREE.Matrix4().copy(V).invert().decompose(pos, q, sc);
     if (!D.have) { D.pos = pos; D.q = q; D.have = true; }
@@ -101,6 +104,12 @@ export function createDesk(video) {
     D.seen = now; D.ok = true; return true;
   }
 
+  // how far (px) the corners land from where a pose puts them
+  function reproj(p, P, Q, f) {
+    const V = viewMatrix(p); let e = 0;
+    P.forEach((w, i) => { const c = new THREE.Vector3(w[0], 0, w[1]).applyMatrix4(V); const u = D.W / 2 + f * c.x / -c.z, v = D.H / 2 - f * c.y / -c.z; e += Math.hypot(u - Q[i][0], v - Q[i][1]); });
+    return e / P.length;
+  }
   // three.js camera = the phone camera, for a picture shown "cover" on a screen of sw x sh px
   function apply(camera, sw, sh) {
     if (!D.have) return;
