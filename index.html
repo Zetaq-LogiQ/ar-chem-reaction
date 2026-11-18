@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Chem Reaction</title>
+<style>
+  :root { --ink: #EAF6FF; --chip: rgba(10, 24, 40, .62); --on: #2FB6E8; }
+  html, body { margin: 0; height: 100%; overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; color: var(--ink); }
+  body { background: linear-gradient(180deg, #F3E6D2 0%, #E4CFB0 60%, #B89670 100%); }
+  #cv { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  #rd { position: fixed; left: 12px; top: max(12px, env(safe-area-inset-top)); background: var(--chip); backdrop-filter: blur(6px); border-radius: 12px; padding: 8px 10px; font-size: 12px; max-width: calc(100vw - 48px); }
+  #rd .rt { font-size: 13px; margin-bottom: 4px; } #rd .rs { opacity: .85; margin-top: 4px; max-width: 330px; } #rd .eq { font-weight: 600; opacity: 1; color: #FFE08A; }
+  #rd table { border-collapse: collapse; } #rd th { font-weight: 600; opacity: .7; text-align: left; padding: 1px 8px 1px 0; white-space: nowrap; vertical-align: top; }
+  #rd td { padding: 1px 8px 1px 0; } #rd tr.tp td { opacity: .5; } .tagk { background: #2FB6E8; color: #04202E; border-radius: 6px; padding: 0 5px; font-size: 11px; }
+  #bar { position: fixed; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%); display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; width: max-content; max-width: calc(100vw - 32px); }
+  #bar button { border: 0; border-radius: 999px; padding: 10px 14px; background: var(--chip); color: var(--ink); font: 600 13px "Segoe UI", system-ui, sans-serif; backdrop-filter: blur(6px); cursor: pointer; }
+  #bar button.on { background: var(--on); color: #04202E; }
+  #toast { position: fixed; left: 50%; bottom: 120px; transform: translateX(-50%); background: rgba(255, 224, 130, .95); color: #08202E; padding: 6px 12px; border-radius: 10px; font-size: 13px; opacity: 0; transition: opacity .3s; pointer-events: none; max-width: calc(100vw - 48px); text-align: center; }
+  #toast.show { opacity: 1; }
+  #ui { position: fixed; inset: 0; pointer-events: none; } #ui > * { pointer-events: auto; } #ui > #toast { pointer-events: none; }
+  #bAR, #bHand { background: #FFD36B !important; color: #08202E !important; }
+  #hint { position: fixed; left: 50%; top: 45%; transform: translate(-50%, -50%); background: var(--chip); padding: 10px 14px; border-radius: 14px; font-size: 14px; text-align: center; max-width: calc(100vw - 64px); }
+  #vid { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  #fx { position: fixed; inset: 0; width: 100%; height: 100%; } #ui > #fx { pointer-events: none; }
+  #fit { position: fixed; left: 50%; transform: translateX(-50%); bottom: 150px; background: var(--chip); padding: 6px 12px; border-radius: 999px; font-size: 12px; display: flex; gap: 8px; align-items: center; white-space: nowrap; }
+  #fit input { width: 150px; }
+  #hand { position: fixed; right: 12px; top: max(12px, env(safe-area-inset-top)); background: var(--chip); padding: 5px 10px; border-radius: 999px; font-size: 12px; }
+  .hide { display: none !important; }
+</style>
+</head>
+<body>
+<video id="vid" class="hide" playsinline muted autoplay></video>
+<canvas id="cv"></canvas>
+<div id="ui">
+  <canvas id="fx"></canvas>
+  <div id="rd"></div>
+  <div id="hint" class="hide"></div>
+  <div id="toast"></div>
+  <div id="hand" class="hide"></div>
+  <label id="fit" class="hide">Camera fit <input id="fitR" type="range" min="45" max="85" step="1" value="63"></label>
+  <div id="bar">
+    <button id="bAR">Place in my room (AR)</button>
+    <button id="bHand">Use my hand</button>
+    <button id="bSmall" class="hide">Smaller</button>
+    <button id="bBig" class="hide">Bigger</button>
+    <button id="bMove" class="hide">Move beakers</button>
+    <button id="bPour">Pour 20 mL</button>
+    <button id="bNext">Next reaction</button>
+    <button id="bReset">Reset</button>
+    <button id="bExit" class="hide">Exit AR</button>
+  </div>
+</div>
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
+<script type="module" src="./main.js?v=1"></script>
+</body>
+</html>
