@@ -42,17 +42,19 @@ export function createHand(video, onStatus) {
   }
 
   // one look at the camera picture (about 20 times a second). cam = three.js camera (matches the phone camera), desk = createDesk()
-  function step(now, desk, cam) {
-    if (!hl || video.readyState < 2 || now - H.lastT < 45) return false;
+  // desk = {f, W, H}: the camera's focal length (px) for a W x H picture; cam.matrixWorld = where the camera is.
+  // src = the picture (the <video>, or a canvas holding the AR camera picture); unit = world units per cm (1 desk, 0.01 room AR)
+  function step(now, desk, cam, src = video, unit = 1) {
+    if (!hl || (src === video && video.readyState < 2) || now - H.lastT < 45) return false;
     H.lastT = now;
-    let r; try { r = hl.detectForVideo(video, now); H.err = 0; }
+    let r; try { r = hl.detectForVideo(src, now); H.err = 0; }
     catch (e) { console.warn(e); if (++H.err > 5 && !H.cpu) { H.cpu = true; try { hl.close(); } catch (_) { } hl = null; H.ok = false; load(); } return false; }
     const lm = r.landmarks && r.landmarks[0], wl = r.worldLandmarks && r.worldLandmarks[0];
     if (!lm || !wl) { if (now - H.seen > 300) { H.lm = null; H.P = null; } return true; }
     const pts = solve(lm, wl, desk.f, desk.W, desk.H, H.scale); if (!pts) return true;
     H.seen = now; H.lm = lm; H.wl = wl;
     // camera (cv axes, cm) -> world: three camera axes are (x, -y, -z)
-    const toW = p => new THREE.Vector3(p.x, -p.y, -p.z).applyMatrix4(cam.matrixWorld);
+    const toW = p => new THREE.Vector3(p.x, -p.y, -p.z).multiplyScalar(unit).applyMatrix4(cam.matrixWorld);
     H.P = pts.map(toW); H.camZ = pts.map(p => p.z);
     const gap = Math.hypot(wl[4].x - wl[8].x, wl[4].y - wl[8].y, wl[4].z - wl[8].z) * H.scale * 100;   // cm between thumb tip and index tip: does not change with distance
     H.gap = gap;
@@ -65,17 +67,18 @@ export function createHand(video, onStatus) {
   // calibration: hand flat on the mat. The wrist and knuckles then lie about 1.2 cm above the paper: compare that true depth with ours.
   let cal = null;
   function calStart() { cal = { t0: performance.now(), k: [] }; }
-  function calStep(cam) {
+  // planeY: world height of the knuckles when the hand lies flat (mat surface + 1.2 cm)
+  function calStep(cam, planeY = 1.2, key = 'hand_scale') {
     if (!cal || !H.P) return cal ? 'Lay your hand flat on the mat' : null;
-    const o = cam.position;
+    const o = new THREE.Vector3().setFromMatrixPosition(cam.matrixWorld);
     for (const i of [0, 5, 9, 13, 17]) {
-      const p = H.P[i], d = p.clone().sub(o), t = (1.2 - o.y) / d.y; if (!(t > 0)) continue;
+      const p = H.P[i], d = p.clone().sub(o), t = (planeY - o.y) / d.y; if (!(t > 0)) continue;
       const truth = o.clone().addScaledVector(d, t); cal.k.push(truth.distanceTo(o) / p.distanceTo(o));
     }
     const el = performance.now() - cal.t0;
     if (el > 2200 && cal.k.length > 20) {
       const s = [...cal.k].sort((a, b) => a - b), m = s[s.length >> 1]; H.scale = THREE.MathUtils.clamp(H.scale * m, .55, 1.4);
-      try { localStorage.setItem('hand_scale', H.scale); } catch (e) { } cal = null; return 'done';
+      try { localStorage.setItem(key, H.scale); } catch (e) { } cal = null; return 'done';
     }
     return 'Hold still… ' + Math.max(0, Math.ceil((2200 - el) / 1000));
   }

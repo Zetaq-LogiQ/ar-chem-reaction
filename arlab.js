@@ -1,108 +1,124 @@
-// arlab.js - the lab on a virtual table in your room, no mat. Place the table on the floor, then work at it:
-//   hand  : one finger (point / open hand) aims - the piece glows and shows its name; pinch (thumb + index) grabs it,
-//           move to carry it, open your fingers to put it down. Carry a bottle over the beaker and it pours.
-//   touch : drag a piece to carry it, tap to see its name, tap the lamp to light it.
-// Pieces are carried along a level just above the tabletop, following the screen point under your pinch (or finger),
-// so the hand never has to reach "into" the scene.
-// Android: WebXR (true room tracking; the hand tracker reads the AR camera picture). iPhone: back camera + motion sensor.
+// arlab.js - "Lab on my table": room AR with no printed mat (Android Chrome, WebXR).
+//  1. Scan your real desk: a lab mat (42 x 30 cm) shows where it will lie. Tap or pinch to put it down, within arm's reach.
+//  2. The glassware stands on the mat at true size.
+//  3. Hand size: lay your hand flat on the mat once. The app knows exactly where the mat is, so it learns your hand's real
+//     size; after that it knows where your hand is in 3D (not just on the screen).
+//  4. Work with your real hand where the glassware is: a dot at your pinch with its shadow on the mat shows the hand's
+//     height; pinch near a piece to hold it, open your fingers to let go. Your hand hides glassware behind it (3D occlusion).
+// Why this works: the room tracking gives true metres, so mat, glassware and your calibrated hand all share one real scale.
 import * as THREE from './vendor/three.module.js';
-import { createGestures } from './gesture.js';
+import { createHand } from './hand.js';
 
-const TABLE_H = 75;                                                       // cm, a normal lab table
+const MAT_W = 42, MAT_D = 30, REACH = .8;                                 // cm, cm, metres (mat farther than this is out of reach)
+const U = .01;                                                            // world metres per cm
 
 export function createARLab({ renderer, scene, camera, E, $, show, toast, sfx, onStop }) {
-  const vid = $('vid'), H = createGestures(vid);
-  let mode = null, placed = false, size = 1, hitSrc = null, camOK = false;
-  const S = () => .01 * size;                                             // the lab works in cm; the room in metres
+  let msg = '';
+  const hand = createHand(null, s => msg = s);
+  let mode = null, placed = false, hitSrc = null, camOK = false, matY = 0, calNeeded = false;
 
-  // the table: the bench top from the lab + four legs, and a soft shadow on the floor
-  const legs = new THREE.Group(); legs.visible = false; E.group.add(legs);
-  const legMat = new THREE.MeshToonMaterial({ color: '#8a5f3d' });
-  for (const x of [-18.5, 18.5]) for (const z of [-13, 13]) { const l = new THREE.Mesh(new THREE.BoxGeometry(2.4, TABLE_H - 1.4, 2.4), legMat); l.position.set(x, -(TABLE_H + 1.4) / 2, z); l.castShadow = true; legs.add(l); }
-  const rail = new THREE.Mesh(new THREE.BoxGeometry(36, 2, 24), legMat); rail.position.y = -TABLE_H + 12; legs.add(rail);
-  const shadowTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'), gr = g.createRadialGradient(32, 32, 4, 32, 32, 32); gr.addColorStop(0, 'rgba(0,0,0,.45)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c); })();
-  const floorShadow = new THREE.Mesh(new THREE.PlaneGeometry(60, 48), new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false }));
-  floorShadow.rotation.x = -Math.PI / 2; floorShadow.position.y = -TABLE_H + .2; legs.add(floorShadow);
-  const reticle = new THREE.Mesh(new THREE.RingGeometry(.12, .15, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#ffd36b' }));
-  reticle.matrixAutoUpdate = false; reticle.visible = false; scene.add(reticle);
+  // ---- the mat (lives in the lab group, cm) and its preview while you choose a spot (metres)
+  const mat = (() => {
+    const c = document.createElement('canvas'); c.width = 840; c.height = 600; const g = c.getContext('2d');
+    g.fillStyle = '#2f5d50'; g.fillRect(0, 0, 840, 600); g.strokeStyle = 'rgba(255,255,255,.08)'; g.lineWidth = 2;
+    for (let x = 0; x <= 840; x += 40) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, 600); g.stroke(); }
+    for (let y = 0; y <= 600; y += 40) { g.beginPath(); g.moveTo(0, y); g.lineTo(840, y); g.stroke(); }
+    g.strokeStyle = '#ffd36b'; g.lineWidth = 6; g.strokeRect(10, 10, 820, 580);
+    g.fillStyle = 'rgba(255,255,255,.55)'; g.font = '600 26px Segoe UI, sans-serif'; g.fillText('ZetaQ Lab', 30, 570);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(MAT_W, MAT_D).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: t }));
+    m.position.set(0, .05, 0); m.renderOrder = -2; m.visible = false; return m;
+  })();
+  E.group.add(mat);
+  const preview = new THREE.Group(); preview.matrixAutoUpdate = false; preview.visible = false; scene.add(preview);
+  preview.add(new THREE.Mesh(new THREE.PlaneGeometry(MAT_W * U, MAT_D * U).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#ffd36b', transparent: true, opacity: .28, depthWrite: false })));
+  const edge = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([x, z]) => new THREE.Vector3(x * MAT_W * U / 2, .001, z * MAT_D * U / 2))), new THREE.LineBasicMaterial({ color: '#ffd36b' }));
+  preview.add(edge);
 
-  function hint(s) { $('hint').textContent = s || ''; show('hint', !!s); }
+  // ---- your hand in 3D: a dot at the pinch point, its shadow on the mat, a thin line between (shows the height)
+  const cur = new THREE.Group(); cur.visible = false; scene.add(cur);
+  const dot = new THREE.Mesh(new THREE.SphereGeometry(.6 * U, 16, 10), new THREE.MeshBasicMaterial({ color: '#6fe0ff', depthTest: false, transparent: true }));
+  const shade = new THREE.Mesh(new THREE.RingGeometry(.4 * U, .8 * U, 24).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#08202e', transparent: true, opacity: .5, depthWrite: false }));
+  const stick = new THREE.Mesh(new THREE.CylinderGeometry(.05 * U, .05 * U, 1, 6).translate(0, .5, 0), new THREE.MeshBasicMaterial({ color: '#6fe0ff', transparent: true, opacity: .5, depthWrite: false }));
+  dot.renderOrder = 30; cur.add(dot, shade, stick);
+  // the hand as an invisible depth shape at its real 3D position: glassware behind your hand is hidden, in front stays visible
+  const occ = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.DoubleSide }));
+  occ.renderOrder = -10; occ.frustumCulled = false; occ.visible = false; scene.add(occ);
+  const BONES = [[0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8], [5, 9], [9, 10], [10, 11], [11, 12], [9, 13], [13, 14], [14, 15], [15, 16], [13, 17], [0, 17], [17, 18], [18, 19], [19, 20]];
+  const occPos = new Float32Array((BONES.length * 6 + 4 * 3) * 3);
+  occ.geometry.setAttribute('position', new THREE.BufferAttribute(occPos, 3));
+  function buildOccluder(P, eye) {
+    let k = 0; const put = v => { occPos[k++] = v.x; occPos[k++] = v.y; occPos[k++] = v.z; };
+    for (const [a, b] of BONES) {                                         // each bone: a flat strip 1.9 cm wide, turned to face the camera
+      const A = P[a], B = P[b], d = B.clone().sub(A), side = d.clone().cross(eye.clone().sub(A)).normalize().multiplyScalar(.95 * U);
+      const a1 = A.clone().add(side), a2 = A.clone().sub(side), b1 = B.clone().add(side), b2 = B.clone().sub(side);
+      put(a1); put(a2); put(b1); put(b1); put(a2); put(b2);
+    }
+    const c = P[0].clone().add(P[5]).add(P[9]).add(P[13]).add(P[17]).multiplyScalar(.2);   // the palm
+    for (const [a, b] of [[0, 5], [5, 9], [9, 13], [13, 17]]) { put(c); put(P[a]); put(P[b]); }
+    occ.geometry.attributes.position.needsUpdate = true;
+  }
+
+  const hint = s => { $('hint').textContent = s || ''; show('hint', !!s); };
   function ui(on) {
-    document.body.classList.toggle('arlab', on); show('touch', on); show('bExitAR', on); show('bBig', on && placed); show('bSmall', on && placed);
+    document.body.classList.toggle('arlab', on); show('touch', on); show('bExitAR', on); show('bCalAR', on && placed);
     ['bDesk', 'bARlab', 'bExit', 'bCal', 'bHandT'].forEach(id => $(id) && show(id, false)); if (!on) ['bDesk', 'bARlab'].forEach(id => show(id, true));
-    E.bench.forEach(o => o.visible = true); legs.visible = on && placed; E.group.visible = !on || placed;
+    E.bench.forEach(o => o.visible = !on); mat.visible = on && placed; E.group.visible = !on || placed;
   }
-  function placeAt(p, faceFrom) {
-    E.group.position.set(p.x, p.y + TABLE_H * S(), p.z); E.group.scale.setScalar(S());
-    E.group.rotation.set(0, Math.atan2(faceFrom.x - p.x, faceFrom.z - p.z), 0);   // the side with the labels faces you
-    placed = true; legs.visible = true; E.group.visible = true; reticle.visible = false; hint(''); show('bBig', true); show('bSmall', true);
-    toast(camOK || mode === 'gyro' ? 'Point at a piece to see it. Pinch to pick it up, carry the acid over the beaker, open your fingers to put it down.' : 'Drag the acid bottle over the beaker to pour.');
-    sfx('place');
-  }
-  function resize(k) {
-    if (!placed) return; const floor = E.group.position.y - TABLE_H * S(); size = THREE.MathUtils.clamp(size * k, .6, 3);
-    E.group.scale.setScalar(S()); E.group.position.y = floor + TABLE_H * S(); toast('Size: ' + size.toFixed(1) + '× real');
-  }
-  $('bBig').onclick = () => resize(1.25); $('bSmall').onclick = () => resize(1 / 1.25);
-  $('bExitAR').onclick = () => mode === 'xr' ? renderer.xr.getSession()?.end() : stop();
+  $('bExitAR').onclick = () => renderer.xr.getSession()?.end();
+  $('bCalAR').onclick = () => startCal();
 
   // ---------------------------------------------------------------- start / stop
   async function start() {
     const xrOK = navigator.xr && await Promise.race([navigator.xr.isSessionSupported('immersive-ar').catch(() => false), new Promise(r => setTimeout(() => r(false), 2000))]);
-    if (xrOK) {
-      try {
-        const session = await navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['hit-test'], optionalFeatures: ['dom-overlay', 'camera-access'], domOverlay: { root: $('ui') } });
-        renderer.xr.enabled = true; renderer.xr.setReferenceSpaceType('local'); await renderer.xr.setSession(session);
-        hitSrc = await session.requestHitTestSource({ space: await session.requestReferenceSpace('viewer') });
-        camOK = !!(session.enabledFeatures && session.enabledFeatures.includes('camera-access')); glBind = null; camFB = null;
-        session.addEventListener('end', stop);
-        mode = 'xr'; placed = false; size = 1; ui(true); document.body.style.background = 'transparent';
-        if (camOK) { H.load(); H.G.map = p => ({ x: p.x, y: p.y }); show('pip', true); }
-        hint('Move the phone slowly over the floor. When the yellow ring appears, tap (or pinch) to place the table.'); return;
-      } catch (e) { console.warn(e); }
-    }
-    // iPhone and phones without AR: back camera + motion sensor
+    if (!xrOK) { toast('Room AR needs Chrome on Android. On iPhone, use the printed mat: Desk lab.'); show('help', true); return; }
     try {
-      if (typeof DeviceOrientationEvent !== 'undefined' && DeviceOrientationEvent.requestPermission && await DeviceOrientationEvent.requestPermission() !== 'granted') return toast('Motion access is needed so the table stays in place.');
-      await H.start('environment');
-    } catch (e) { console.warn(e); return toast('Could not open the camera. Allow camera access and try again.'); }
-    addEventListener('deviceorientation', onOri); startSensor();
-    H.G.map = p => { const W = innerWidth, Hh = innerHeight, vw = vid.videoWidth, vh = vid.videoHeight, s = Math.max(W / vw, Hh / vh); return { x: ((W - vw * s) / 2 + p.x * vw * s) / W, y: ((Hh - vh * s) / 2 + p.y * vh * s) / Hh }; };
-    mode = 'gyro'; placed = false; size = 1; ui(true); show('vid', true); show('pip', true); document.body.style.background = '#000';
-    camera.clearViewOffset(); camera.position.set(0, EYE, 0); camera.near = .02; camera.far = 50;
-    hint('Point the middle of the screen at the floor where the table should stand, then tap (or pinch).');
+      const session = await navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['hit-test'], optionalFeatures: ['dom-overlay', 'camera-access'], domOverlay: { root: $('ui') } });
+      renderer.xr.enabled = true; renderer.xr.setReferenceSpaceType('local'); await renderer.xr.setSession(session);
+      hitSrc = await session.requestHitTestSource({ space: await session.requestReferenceSpace('viewer') });
+      camOK = !!(session.enabledFeatures && session.enabledFeatures.includes('camera-access')); glBind = null; camFB = null;
+      session.addEventListener('end', stop);
+      mode = 'xr'; placed = false; ui(true); document.body.style.background = 'transparent';
+      if (camOK) { hand.load(); show('pip', true); } else toast('This phone cannot share the AR camera with hand tracking: use touch (drag pieces).');
+      hint('Point the phone at your table. Move it slowly until the yellow mat appears, then tap or pinch to put it down.');
+    } catch (e) { console.warn(e); toast('Could not start AR on this phone.'); }
   }
   function stop() {
-    if (!mode) return; const was = mode; mode = null; placed = false; hitSrc = null; reticle.visible = false;
-    if (held) { E.release(); held = null; }
-    if (was === 'gyro') { removeEventListener('deviceorientation', onOri); ori = null; try { sensor && sensor.stop(); } catch (e) { } sensor = sensQ = null; H.stop(); }
-    H.G.map = null; show('vid', false); show('pip', false); show('cur', false); show('tag', false); hint('');
-    E.group.position.set(0, 0, 0); E.group.scale.setScalar(1); E.group.rotation.set(0, 0, 0); camera.quaternion.identity(); camera.near = 1; camera.far = 600;
-    ui(false); document.body.style.background = ''; E.hover = null; onStop();
+    if (!mode) return; mode = null; placed = false; hitSrc = null; preview.visible = false; cur.visible = false; occ.visible = false;
+    if (held) drop();
+    show('pip', false); show('tag', false); hint(''); E.hover = null;
+    E.group.position.set(0, 0, 0); E.group.scale.setScalar(1); E.group.rotation.set(0, 0, 0);
+    ui(false); document.body.style.background = ''; const fx = $('fx'); fx.getContext('2d').clearRect(0, 0, fx.width, fx.height); onStop();
   }
 
-  // ---------------------------------------------------------------- iPhone view: motion sensor turns the camera (stand in one place)
-  const EYE = 1.3; let ori = null, sensor = null, sensQ = null, longFov = 63;
-  try { const f = +localStorage.getItem('pb_fov'); if (f >= 45 && f <= 85) longFov = f; } catch (e) { }
-  const onOri = e => { if (e.alpha != null) ori = e; };
-  const qFix = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2), qT = new THREE.Quaternion(), qX = new THREE.Quaternion(-Math.SQRT1_2, 0, 0, Math.SQRT1_2), qS = new THREE.Quaternion(), eul = new THREE.Euler();
-  function startSensor() { if (typeof RelativeOrientationSensor === 'undefined') return; try { sensor = new RelativeOrientationSensor({ frequency: 60, referenceFrame: 'screen' }); sensor.addEventListener('reading', () => sensQ = sensor && sensor.quaternion); sensor.addEventListener('error', () => { sensor = null; sensQ = null; }); sensor.start(); } catch (e) { sensor = null; } }
-  function gyroFrame() {
-    let got = false;
-    if (sensQ) { qT.fromArray(sensQ).premultiply(qFix); got = true; }
-    else if (ori) { const D = THREE.MathUtils.degToRad, o = D(screen.orientation?.angle ?? window.orientation ?? 0); eul.set(D(ori.beta), D(ori.alpha), -D(ori.gamma), 'YXZ'); qT.setFromEuler(eul).multiply(qX).multiply(qS.setFromAxisAngle(new THREE.Vector3(0, 0, 1), -o)); got = true; }
-    if (got) { if (camera.quaternion.angleTo(qT) > .5) camera.quaternion.copy(qT); else camera.quaternion.slerp(qT, sensQ ? .85 : .5); }
-    const vw = vid.videoWidth || 720, vh = vid.videoHeight || 1280, f = Math.max(vw, vh) / 2 / Math.tan(THREE.MathUtils.degToRad(longFov / 2)), s = Math.max(innerWidth / vw, innerHeight / vh);
-    camera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(innerHeight / 2 / s / f)); camera.aspect = innerWidth / innerHeight; camera.position.set(0, EYE, 0); camera.updateProjectionMatrix(); camera.updateMatrixWorld();
-    if (!placed) { const r = rayAt(innerWidth / 2, innerHeight / 2), p = r.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), new THREE.Vector3()); reticle.visible = !!p && p.distanceTo(camera.position) < 5; if (p) reticle.matrix.makeTranslation(p.x, .002, p.z); }
+  // ---------------------------------------------------------------- placing the mat
+  const camPos = new THREE.Vector3(), hitPos = new THREE.Vector3(), hitQ = new THREE.Quaternion(), hitS = new THREE.Vector3();
+  let canPlace = false, yaw = 0;
+  function placePreview(pose) {
+    new THREE.Matrix4().fromArray(pose.transform.matrix).decompose(hitPos, hitQ, hitS);
+    viewCam().getWorldPosition(camPos); yaw = Math.atan2(camPos.x - hitPos.x, camPos.z - hitPos.z);
+    preview.matrix.compose(hitPos, new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), new THREE.Vector3(1, 1, 1)); preview.visible = true;
+    const far = Math.hypot(camPos.x - hitPos.x, camPos.z - hitPos.z) > REACH, high = camPos.y - hitPos.y < .15;
+    canPlace = !far && !high;
+    preview.children.forEach(m => m.material.color.set(canPlace ? '#ffd36b' : '#ff7a6b'));
+    hint(far ? 'Too far: the mat must be within arm\'s reach. Come closer to the table.' : high ? 'Hold the phone above the table, looking down at it.' : 'Tap or pinch to put the mat here.');
   }
+  function place() {
+    if (placed || !preview.visible) return;
+    if (!canPlace) return toast('Come closer: the mat must be where your hand can reach it.');
+    E.group.position.copy(hitPos); E.group.scale.setScalar(U); E.group.rotation.set(0, yaw, 0); matY = hitPos.y;
+    placed = true; preview.visible = false; mat.visible = true; E.group.visible = true; show('bCalAR', true); hint(''); sfx('place');
+    let s = 0; try { s = +localStorage.getItem('hand_scale_ok'); } catch (e) { }
+    if (camOK && !s) startCal(); else toast('Pinch a glowing piece to hold it. Carry the acid bottle to the beaker to pour.');
+  }
+  // ---------------------------------------------------------------- hand size (lay the hand flat on the mat)
+  function startCal() { if (!camOK) return toast('Hand tracking is not available on this phone.'); calNeeded = true; hand.calStart(); hint('Hand size: lay your hand flat on the mat, fingers together, and hold still.'); }
 
-  // ---------------------------------------------------------------- screen point -> ray (works for both views)
+  // ---------------------------------------------------------------- touch (backup): drag a piece along a level above the mat, tap the lamp
   const rc = new THREE.Raycaster();
-  const viewCam = () => mode === 'xr' ? (renderer.xr.getCamera().cameras[0] || camera) : camera;
+  const viewCam = () => renderer.xr.getCamera().cameras[0] || camera;
   function rayAt(x, y) { rc.setFromCamera(new THREE.Vector2(x / innerWidth * 2 - 1, -y / innerHeight * 2 + 1), viewCam()); return rc.ray.clone(); }
-  function toScreen(v) { const p = v.clone().project(viewCam()); return { x: (p.x + 1) / 2 * innerWidth, y: (1 - p.y) / 2 * innerHeight, z: p.z }; }
-  // the piece nearest the screen point (within 34 px of its outline; the glowing piece the step needs wins a close call)
+  const toScreen = v => { const p = v.clone().project(viewCam()); return { x: (p.x + 1) / 2 * innerWidth, y: (1 - p.y) / 2 * innerHeight, z: p.z }; };
   function pickAt(x, y) {
     const cam = viewCam(), right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.getWorldQuaternion(new THREE.Quaternion())); let best = null, bd = 34;
     for (const c of E.pickables()) {
@@ -113,79 +129,68 @@ export function createARLab({ renderer, scene, camera, E, $, show, toast, sfx, o
     }
     return best;
   }
-  // carrying: a held piece moves on a level just above whatever it is being taken to
   let held = null, heldBy = null; const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-  function grabAt(id, x, y, by = 'touch') {
-    if (!placed || !id) return false;
-    if (E.kindOf(id) === 'tap') { E.tap(id); return false; }
-    const g = E.grabPoint(id); plane.constant = -Math.max(g.y + 3 * S(), E.liftFor(id));
-    const p = rayAt(x, y).intersectPlane(plane, new THREE.Vector3()); if (!p || !E.grab(id, p, 'ar')) return false;
-    held = id; heldBy = by; E.hover = id; return true;
-  }
-  function carryTo(x, y) { if (!held) return; const p = rayAt(x, y).intersectPlane(plane, new THREE.Vector3()); if (p) E.move(p); }
   function drop() { if (!held) return; E.release(); held = heldBy = null; E.hover = null; }
-  function place() {
-    if (placed || !reticle.visible) return;
-    const p = new THREE.Vector3().setFromMatrixPosition(reticle.matrix), c = new THREE.Vector3(); viewCam().getWorldPosition(c);
-    placeAt(p, c);
-  }
-
-  // ---------------------------------------------------------------- touch: drag a piece to carry it, tap to see a name / light the lamp
   const tl = $('touch'); let td = null;
-  tl.addEventListener('pointerdown', e => {
-    if (!mode || td) return; tl.setPointerCapture(e.pointerId);
-    td = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), moved: 0, piece: placed ? pickAt(e.clientX, e.clientY) : null };
-  });
+  tl.addEventListener('pointerdown', e => { if (!mode || td) return; tl.setPointerCapture(e.pointerId); td = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), moved: 0, piece: placed ? pickAt(e.clientX, e.clientY) : null }; });
   tl.addEventListener('pointermove', e => {
     if (!td || td.id !== e.pointerId) return; td.moved = Math.max(td.moved, Math.hypot(e.clientX - td.x, e.clientY - td.y));
-    if (!held && td.piece && td.moved > 6 && E.kindOf(td.piece) !== 'tap') grabAt(td.piece, td.x, td.y);
-    if (held) carryTo(e.clientX, e.clientY);
+    if (!held && td.piece && td.moved > 6 && E.kindOf(td.piece) !== 'tap') {
+      const g = E.grabPoint(td.piece); plane.constant = -Math.max(g.y + 3 * U, E.liftFor(td.piece));
+      const p = rayAt(td.x, td.y).intersectPlane(plane, new THREE.Vector3()); if (p && E.grab(td.piece, p, 'touch')) { held = td.piece; heldBy = 'touch'; }
+    }
+    if (held && heldBy === 'touch') { const p = rayAt(e.clientX, e.clientY).intersectPlane(plane, new THREE.Vector3()); if (p) E.move(p); }
   });
   function tup(e) {
     if (!td || td.id !== e.pointerId) return; const t = td; td = null;
-    if (held) return drop();
-    if (t.moved <= 6 && performance.now() - t.t < 450) {
-      if (!placed) return place();
-      if (t.piece && E.kindOf(t.piece) === 'tap') return E.tap(t.piece);
-      E.hover = t.piece; tagFor(t.piece);
-    }
+    if (held && heldBy === 'touch') return drop();
+    if (t.moved <= 6 && performance.now() - t.t < 450) { if (!placed) return place(); if (t.piece && E.kindOf(t.piece) === 'tap') return E.tap(t.piece); E.hover = t.piece; }
   }
   tl.addEventListener('pointerup', tup); tl.addEventListener('pointercancel', tup);
-  $('ui').addEventListener('beforexrselect', e => { if (mode === 'xr') e.preventDefault(); });   // all touches go to the touch layer
+  $('ui').addEventListener('beforexrselect', e => { if (mode) e.preventDefault(); });
 
-  // ---------------------------------------------------------------- hand: point = aim, pinch = grab / carry, open = put down
-  let prev = 'none', openT = 0, last = 0; const aimHist = [];
-  function handFrame(now, src) {
-    const G = H.G, fresh = H.step(now, src), dt = Math.min(.2, (now - (last || now)) / 1000); last = now;
-    const live = G.lm && now - G.seen < 300, g = live ? G.gesture : 'none';
-    $('gl2').textContent = G.ready ? ({ open: 'Open hand: aim', point: 'Pointing: aim', pinch: held ? 'Holding' : 'Pinch', fist: 'Fist', none: 'No hand' })[g] : G.msg;
-    if (!live) { show('cur', false); if (held && heldBy === 'hand' && now - G.seen > 700) drop(); prev = 'none'; return; }
-    const tx = G.tip.x * innerWidth, ty = G.tip.y * innerHeight - 40, px = G.pinchPt.x * innerWidth, py = G.pinchPt.y * innerHeight;
-    const cx = held || g === 'pinch' ? px : tx, cy = held || g === 'pinch' ? py : ty, c = $('cur');
-    c.style.transform = `translate(${cx}px, ${cy}px)`; c.setAttribute('class', 'g-' + (held ? 'pinch' : g)); show('cur', true);
-    if (!held && (g === 'open' || g === 'point') && fresh && placed) {
-      const id = pickAt(tx, ty); E.hover = id; tagFor(id);
-      aimHist.push({ t: now, id, x: px, y: py }); while (aimHist.length && now - aimHist[0].t > 600) aimHist.shift();
+  // ---------------------------------------------------------------- the hand, in 3D
+  let wasPinch = false, openT = 0, lastT = 0;
+  const camObj = { matrixWorld: new THREE.Matrix4() };
+  function handFrame(now, cv, view) {
+    const dt = Math.min(.2, (now - (lastT || now)) / 1000); lastT = now;
+    const f = view.projectionMatrix[0] * camW / 2;                        // focal length in camera-picture pixels
+    camObj.matrixWorld.fromArray(view.transform.matrix);
+    hand.step(now, { f, W: camW, H: camH }, camObj, cv, U);
+    const Hh = hand.H, live = Hh.P && now - Hh.seen < 300;
+    $('gl2').textContent = !hand.ready ? msg : !live ? 'Show your hand' : Hh.pinch ? (held ? 'Holding' : 'Pinch') : 'Hand found';
+    if (!live) { cur.visible = false; occ.visible = false; if (held && heldBy === 'hand' && now - Hh.seen > 700) drop(); return; }
+    occ.visible = true; buildOccluder(Hh.P, new THREE.Vector3().setFromMatrixPosition(camObj.matrixWorld));
+    if (calNeeded && hand.calibrating) {                                  // hand-size step: everything else waits
+      const r = hand.calStep(camObj, matY + 1.2 * U, 'hand_scale');
+      if (r === 'done') { calNeeded = false; try { localStorage.setItem('hand_scale_ok', '1'); } catch (e) { } hint(''); toast('Hand size set. Now pinch a glowing piece to hold it.'); sfx('place'); }
+      else hint('Hand size: lay your hand flat on the mat, fingers together. ' + (r || ''));
+      cur.visible = false; return;
     }
-    if (heldBy === 'touch') { prev = g; return; }                        // a finger on the screen is carrying something: the hand waits
-    if (g === 'pinch' && prev !== 'pinch' && !held) {                    // pinch closes: place the table, or grab what was aimed at a moment ago
-      if (!placed) { place(); prev = g; return; }
-      const a = aimHist.filter(h => now - h.t > 100).pop() || aimHist[aimHist.length - 1];
-      if (a && a.id) { if (E.kindOf(a.id) === 'tap') E.tap(a.id); else if (grabAt(a.id, px, py, 'hand')) { sfx('pick'); openT = 0; } }
+    const tip = Hh.tip.clone(); if (placed) tip.y = Math.max(tip.y, matY + .2 * U);
+    cur.visible = placed; dot.position.copy(tip); shade.position.set(tip.x, matY + .08 * U, tip.z); stick.position.copy(shade.position); stick.scale.y = Math.max(.0001, tip.y - matY);
+    dot.material.color.set(Hh.pinch ? '#4fe08a' : '#6fe0ff');
+    if (!placed) { if (Hh.pinch && !wasPinch) place(); wasPinch = Hh.pinch; return; }
+    if (heldBy === 'touch') { wasPinch = Hh.pinch; return; }
+    if (!held) {
+      E.hover = E.nearest(tip, 4);                                        // within 4 cm of a piece (in real space)
+      if (Hh.pinch && !wasPinch && E.hover) {
+        if (E.kindOf(E.hover) === 'tap') E.tap(E.hover);
+        else if (E.grab(E.hover, tip, 'hand')) { held = E.hover; heldBy = 'hand'; openT = 0; }
+      }
+    } else {
+      E.move(tip); E.hover = held;
+      if (!Hh.pinch) { openT += dt; if (openT > .15) drop(); } else openT = 0;
     }
-    if (held) {
-      if (g === 'pinch' || g === 'fist') { carryTo(px, py); openT = 0; tagFor(held); }
-      else { openT += dt; if (openT > .18) drop(); }                     // fingers open for a moment: put it down
-    }
-    prev = g;
+    wasPinch = Hh.pinch;
   }
   function tagFor(id) {
     if (!id) return show('tag', false);
-    const p = toScreen(E.anchor(id)); if (p.z > 1) return show('tag', false);
-    const t = $('tag'); t.textContent = E.label(id); t.style.left = THREE.MathUtils.clamp(p.x, 70, innerWidth - 70) + 'px'; t.style.top = THREE.MathUtils.clamp(p.y - 14, 90, innerHeight - 120) + 'px'; show('tag', true);
+    const p = toScreen(E.anchor(id).clone().add(new THREE.Vector3(0, 2 * U, 0))); if (p.z > 1) return show('tag', false);
+    const t = $('tag'); t.textContent = E.label(id); t.style.left = THREE.MathUtils.clamp(p.x, 70, innerWidth - 70) + 'px'; t.style.top = THREE.MathUtils.clamp(p.y, 90, innerHeight - 120) + 'px'; show('tag', true);
   }
 
-  // ---------------------------------------------------------------- the AR camera picture (GPU texture) -> a small canvas for the hand tracker
+  // ---------------------------------------------------------------- AR camera picture (GPU texture) -> small canvas for the hand tracker
   const gl = renderer.getContext(); let glBind = null, camFB = null, camProg = null, camBuf = null, camPix = null, camCv = null, camCtx = null, camW = 0, camH = 0, camT = 0;
   function camSetup(w, h) {
     camW = 320; camH = Math.max(64, Math.round(320 * h / w));
@@ -199,9 +204,8 @@ export function createARLab({ renderer, scene, camera, E, $, show, toast, sfx, o
     camFB = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, camFB); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, out, 0);
     camPix = new Uint8ClampedArray(camW * camH * 4); camCv = document.createElement('canvas'); camCv.width = camW; camCv.height = camH; camCtx = camCv.getContext('2d');
   }
-  function xrCamera(now, frame) {
-    if (!camOK || now - camT < 70) return null;
-    const view = frame.getViewerPose(renderer.xr.getReferenceSpace())?.views[0]; if (!view || !view.camera) return null; camT = now;
+  function xrCamera(now, view) {
+    if (!camOK || !view.camera || now - camT < 60) return null; camT = now;
     try {
       glBind = glBind || new XRWebGLBinding(renderer.xr.getSession(), gl);
       const tex = glBind.getCameraImage(view.camera); if (!tex) return null;
@@ -213,29 +217,26 @@ export function createARLab({ renderer, scene, camera, E, $, show, toast, sfx, o
       const loc = gl.getAttribLocation(camProg, 'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
       gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex); gl.uniform1i(gl.getUniformLocation(camProg, 't'), 0);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); gl.readPixels(0, 0, camW, camH, gl.RGBA, gl.UNSIGNED_BYTE, camPix); gl.disableVertexAttribArray(loc);
-    } catch (e) { console.warn(e); renderer.resetState(); camOK = false; $('gl2').textContent = 'No camera picture in AR: use touch'; return null; }
+    } catch (e) { console.warn(e); renderer.resetState(); camOK = false; toast('No camera picture for hand tracking: use touch.'); return null; }
     renderer.resetState(); camCtx.putImageData(new ImageData(camPix, camW, camH), 0, 0); return camCv;
   }
-
-  // the small camera window with the hand skeleton (so you can see the tracker sees your hand)
+  // the small window: what the hand tracker sees, with the hand skeleton
   const pc = $('pipc'), p2 = pc.getContext('2d');
-  const BONES = [[0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8], [5, 9], [9, 10], [10, 11], [11, 12], [9, 13], [13, 14], [14, 15], [15, 16], [13, 17], [0, 17], [17, 18], [18, 19], [19, 20]];
-  function drawPip(src) {
-    const W = pc.width, Hh = pc.height; if (src && (src.readyState >= 2 || src.width)) p2.drawImage(src, 0, 0, W, Hh); else { p2.fillStyle = '#111'; p2.fillRect(0, 0, W, Hh); }
-    const L = H.G.lm; if (!L || performance.now() - H.G.seen > 300) return;
-    const P = L.map(p => [p.x * W, p.y * Hh]), col = { pinch: '#ffd36b', fist: '#ff8a6b', point: '#6fe0ff', open: '#ffffff' }[H.G.gesture] || '#fff';
-    p2.strokeStyle = col; p2.lineWidth = 2.5; p2.beginPath(); for (const [a, b] of BONES) { p2.moveTo(...P[a]); p2.lineTo(...P[b]); } p2.stroke();
+  function drawPip() {
+    if (!camCv) return; const W = pc.width, Hh = pc.height; p2.drawImage(camCv, 0, 0, W, Hh);
+    const L = hand.H.lm; if (!L || performance.now() - hand.H.seen > 300) return;
+    p2.strokeStyle = hand.H.pinch ? '#ffd36b' : '#6fe0ff'; p2.lineWidth = 2.5; p2.beginPath();
+    for (const [a, b] of BONES) { p2.moveTo(L[a].x * W, L[a].y * Hh); p2.lineTo(L[b].x * W, L[b].y * Hh); } p2.stroke();
   }
 
-  // ---------------------------------------------------------------- each frame (called by main.js while active)
+  // ---------------------------------------------------------------- each frame
   function frame(now, xrFrame) {
-    let src = vid;
-    if (mode === 'xr' && xrFrame) {
-      if (hitSrc && !placed) { const res = xrFrame.getHitTestResults(hitSrc), pose = res.length && res[0].getPose(renderer.xr.getReferenceSpace()); reticle.visible = !!pose; if (pose) reticle.matrix.fromArray(pose.transform.matrix); }
-      const cv = xrCamera(now, xrFrame); src = camCv; if (cv) handFrame(now, cv);
-    } else if (mode === 'gyro') { gyroFrame(); handFrame(now, vid); }
-    if (held && !td && !(H.G.lm && performance.now() - H.G.seen < 300)) { /* carried by touch or waiting for the hand */ }
-    if (!$('pip').classList.contains('hide')) drawPip(src);
+    if (mode !== 'xr' || !xrFrame) return;
+    const view = xrFrame.getViewerPose(renderer.xr.getReferenceSpace())?.views[0];
+    if (hitSrc && !placed) { const res = xrFrame.getHitTestResults(hitSrc), pose = res.length && res[0].getPose(renderer.xr.getReferenceSpace()); if (pose) placePreview(pose); else { preview.visible = false; hint('Point the phone at your table and move it slowly.'); } }
+    if (view) { const cv = xrCamera(now, view); if (cv) handFrame(now, cv, view); }
+    tagFor(held || E.hover);
+    drawPip();
   }
-  return { start, stop, frame, get active() { return !!mode; }, get placed() { return placed; }, H, pickAt, grabAt, carryTo, drop, place, placeAt, get mode() { return mode; } };
+  return { start, stop, frame, get active() { return !!mode; }, get placed() { return placed; }, hand, get mode() { return mode; } };
 }
