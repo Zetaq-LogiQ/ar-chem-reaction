@@ -380,24 +380,26 @@ export function createExperiment(ctx) {
 
   // ---------------------------------------------------------------- finding pieces
   const segW = it => [it.obj.localToWorld(it.seg[0].clone()), it.obj.localToWorld(it.seg[1].clone())];
+  // world units per cm: 1 on screen and in the desk lab (cm), 0.01 x size in room AR (metres)
+  const wsV = V(0, 0, 0), ws = () => K.getWorldScale(wsV).x / 10;
   const pickable = it => it.kind === 'pour' || it.kind === 'tool' || it.kind === 'tap';
   // the piece nearest to a point in the room (cm), within max cm of its surface
   // (the piece the current step needs - the glowing one - wins a close call)
   function nearest(p, max) {
-    let best = null, bd = max; const l = new THREE.Line3(), q = V(0, 0, 0), hints = held ? [] : STEPS[step()].pick;
-    for (const id in I) { const it = I[id]; if (!pickable(it) || it.ret) continue; const [a, c] = segW(it); l.set(a, c); l.closestPointToPoint(p, true, q); const d = q.distanceTo(p) - it.r * 10 - (hints.includes(id) ? 1.5 : 0); if (d < bd) { bd = d; best = id; } }
+    const w = ws(); let best = null, bd = max * w; const l = new THREE.Line3(), q = V(0, 0, 0), hints = held ? [] : STEPS[step()].pick;
+    for (const id in I) { const it = I[id]; if (!pickable(it) || it.ret) continue; const [a, c] = segW(it); l.set(a, c); l.closestPointToPoint(p, true, q); const d = q.distanceTo(p) - (it.r * 10 + (hints.includes(id) ? 1.5 : 0)) * w; if (d < bd) { bd = d; best = id; } }
     return best;
   }
   // every piece that can be picked, as a segment (world cm) + radius, for picking on screen
-  function pickables() { const hints = held ? [] : STEPS[step()].pick; return Object.values(I).filter(it => pickable(it) && !it.ret).map(it => { const [a, c] = segW(it); return { id: it.id, a, c, r: it.r * 10, hint: hints.includes(it.id) }; }); }
+  function pickables() { const hints = held ? [] : STEPS[step()].pick; return Object.values(I).filter(it => pickable(it) && !it.ret).map(it => { const [a, c] = segW(it); return { id: it.id, a, c, r: it.r * 10 * ws(), hint: hints.includes(it.id) }; }); }
   // the piece a screen ray points at (a ray passing within tol cm still counts: a finger is wide)
   function pickRay(ray, tol = 2) {
-    let best = null, bd = tol;
-    for (const id in I) { const it = I[id]; if (!pickable(it)) continue; const [a, c] = segW(it); const d = Math.sqrt(ray.distanceSqToSegment(a, c)) - it.r * 10; if (d < bd) { bd = d; best = id; } }
+    const w = ws(); let best = null, bd = tol * w;
+    for (const id in I) { const it = I[id]; if (!pickable(it)) continue; const [a, c] = segW(it); const d = Math.sqrt(ray.distanceSqToSegment(a, c)) - it.r * 10 * w; if (d < bd) { bd = d; best = id; } }
     return best;
   }
   // how high a touch drag should carry this piece (world cm) so it clears its targets
-  const liftFor = id => targets(id).reduce((m, t) => Math.max(m, K.localToWorld(mouth(t[0])).y + 2.5), 0);
+  const liftFor = id => targets(id).reduce((m, t) => Math.max(m, K.localToWorld(mouth(t[0])).y + 2.5 * ws()), -Infinity);
   const anchor = id => { const [a, c] = segW(I[id]); return a.y > c.y ? a : c; };
   const grabPoint = id => { const it = I[id]; return it.obj.localToWorld(it.seg[0].clone().lerp(it.seg[1], it.gf)); };
 

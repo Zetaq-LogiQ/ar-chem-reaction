@@ -6,6 +6,7 @@ import * as THREE from './vendor/three.module.js';
 import { createExperiment } from './experiment.js';
 import { createDesk } from './desk.js';
 import { createHand } from './hand.js';
+import { createARLab } from './arlab.js';
 
 const $ = id => document.getElementById(id), V = (x, y, z) => new THREE.Vector3(x, y, z);
 const clamp = THREE.MathUtils.clamp;
@@ -35,6 +36,7 @@ function sfx(k) {
 }
 
 const E = createExperiment({ toast, sfx }); scene.add(E.group);
+const ar = createARLab({ renderer, scene, camera, E, $, show: (id, on) => show(id, on), toast, sfx, onStop: () => layout() });
 const catcher = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), new THREE.ShadowMaterial({ opacity: .28 }));
 catcher.rotation.x = -Math.PI / 2; catcher.position.y = .02; catcher.receiveShadow = true; catcher.visible = false; scene.add(catcher);
 
@@ -80,6 +82,7 @@ function stopDesk() {
   show('bDesk', true); ['bCal', 'bHandT', 'bExit'].forEach(id => show(id, false)); layout();
 }
 $('bExit').onclick = stopDesk;
+$('bARlab').onclick = () => { show('help', false); ar.start(); };
 $('bSkip').onclick = () => E.skip();
 $('bRestart').onclick = () => E.restart();
 $('bCal').onclick = () => { if (!hand.ready) return toast('Hand tracking is still loading.'); hand.calStart(); };
@@ -198,8 +201,13 @@ function drawTag() {
 
 // ------------------------------------------------------------------ loop
 let last = performance.now(), cardT = 0;
-function frame(now) {
+function frame(now, xrFrame) {
   const dt = Math.min(.05, (now - last) / 1000); last = now;
+  if (ar.active) {                                                       // the lab on a virtual table in your room
+    ar.frame(now, xrFrame); E.update(dt, now / 1000); show('st', false);
+    cardT -= dt; if (cardT <= 0) { $('card').innerHTML = E.card(); cardT = .25; }
+    renderer.render(scene, camera); fx2.clearRect(0, 0, fx.width, fx.height); return;
+  }
   if (mode === 'desk') {
     desk.step(now);
     if (desk.ok) { desk.apply(camera, innerWidth, innerHeight); E.group.visible = true; }
@@ -216,4 +224,4 @@ function frame(now) {
   drawHand(); drawTag();
 }
 renderer.setAnimationLoop(frame);
-window.__lab = { E, camera, desk, hand, THREE, startDesk, stopDesk, get mode() { return mode; } };
+window.__lab = { E, camera, desk, hand, THREE, startDesk, stopDesk, ar, get mode() { return mode; } };
